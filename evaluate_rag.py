@@ -11,8 +11,11 @@ documents = SimpleDirectoryReader("data").load_data()
 # Create an index from the documents
 index = VectorStoreIndex.from_documents(documents)
 
+# Create a retriever to fetch relevant documents
+retriever = index.as_retriever(retrieval_mode='similarity', k=3)
+
 # Create a query engine
-query_engine = index.as_query_engine()
+# query_engine = index.as_query_engine()
 
 langfuse = Langfuse()
 
@@ -45,7 +48,11 @@ def llm_evaluation(output, expected_output):
     )
     
     evaluation = response.choices[0].message.content
-    result = eval(evaluation)  # Convert the JSON string to a Python dictionary
+    try:
+        result = eval(evaluation)  # Convert the JSON string to a Python dictionary
+    except Exception as e:
+        print(f"Error evaluating response: {e}")
+        result = {"score": 0, "reason": "Error evaluating response"}
     
     # Debug printout
     print(f"Output: {output}")
@@ -55,14 +62,62 @@ def llm_evaluation(output, expected_output):
     return result["score"], result["reason"]
 
 from datetime import datetime
+
+
+def custom_query(input):
+    # Retrieve relevant documents
+    relevant_docs = retriever.retrieve(input)
+    
+    print(f"Number of relevant documents: {len(relevant_docs)}")
+    print("\n" + "="*50 + "\n")
+    
+    relevant_docs_str = ""
+    for i, doc in enumerate(relevant_docs):
+        relevant_docs_str += f"Document {i+1}:\n"
+        relevant_docs_str += f"Document content: {doc.node.get_content()}...\n"
+        relevant_docs_str += "\n" + "="*50 + "\n"
+        
+    print("Relevant documents: ", relevant_docs_str)
+    
+    
+    # for i, doc in enumerate(relevant_docs):
+    #     print(f"Document {i+1}:")
+    #     print(f"Text sample: {doc.node.get_content()[:200]}...")  # Print first 200 characters
+    #     print(f"Metadata: {doc.node.metadata}")
+    #     print(f"Score: {doc.score}")
+    #     print("\n" + "="*50 + "\n")
+
+    # Create a prompt for the LLM
+    prompt = f"""
+    You are an AI assistant tasked with answering questions based on the following documents:
+    {relevant_docs_str}
+    
+    Question: {input}
+    """
+    
+    client = openai.OpenAI()
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "You are an AI assistant tasked with answering questions based on information provided in the documents."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.2
+    )
+    
+    return response.choices[0].message.content
+
+
  
 def rag_query(input):
   
   generationStartTime = datetime.now()
 
-  response = query_engine.query(input)
-  output = response.response
-  print(output)
+  # response = query_engine.query(input)
+  # output = response.response
+  output = custom_query(input)
+  print("input: ", input)
+  print("output: ", output)
  
   langfuse_generation = langfuse.generation(
     name="strategic-plan-qa",
@@ -90,4 +145,4 @@ def run_experiment(experiment_name):
       comment=reason
     )
 
-run_experiment("Experiment 2")
+run_experiment("Experiment 3")
